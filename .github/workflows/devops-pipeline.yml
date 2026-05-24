@@ -2,17 +2,24 @@ name: DevOps CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "dev" ] # Le pipeline se déclenche UNIQUEMENT quand tu pushes sur dev
 
 jobs:
-  sonarcloud:
-    name: Analyse Qualité Code (SonarCloud)
+  pipeline-unique:
+    name: Pipeline Qualité, Sécurité, Synchro main et Docker
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Nécessaire pour que le robot mette à jour la branche main
+      packages: write  # Nécessaire pour publier le package Docker
+    
     steps:
+      # --- 1. Récupération du code ---
       - name: Récupérer le code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # --- 2. Analyse Qualité (SonarCloud) ---
       - name: Analyse SonarCloud
         uses: SonarSource/sonarcloud-github-action@master
         env:
@@ -25,13 +32,7 @@ jobs:
             -Dsonar.projectName=node-bulletin-board
             -Dsonar.sources=bulletin-board-app
 
-  security-scan:
-    name: Scan Sécurité (Trivy)
-    needs: sonarcloud
-    runs-on: ubuntu-latest
-    steps:
-      - name: Récupérer le code
-        uses: actions/checkout@v4
+      # --- 3. Scan de Sécurité (Trivy) ---
       - name: Scanner le code avec Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -41,18 +42,18 @@ jobs:
           exit-code: '0'
           severity: 'CRITICAL,HIGH'
 
-  build-and-push-docker:
-    name: Build & Push Image Docker
-    if: github.ref == 'refs/heads/main'
-    needs: security-scan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # Crucial pour publier le package
-    steps:
-      - name: Récupérer le code
-        uses: actions/checkout@v4
+      # --- 4. Synchronisation automatique vers main ---
+      # Le robot fusionne lui-même dev dans main si les tests passent !
+      - name: Fusionner automatiquement dev vers main
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git merge origin/dev --ff-only
+          git push origin main
 
+      # --- 5. Connexion au Registre GitHub (GHCR) ---
       - name: Connexion au Registre GitHub (GHCR)
         uses: docker/login-action@v3
         with:
@@ -60,12 +61,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # --- 6. Build & Publication de l'image Docker ---
       - name: Build et Push de l'image Docker
         uses: docker/build-push-action@v5
         with:
           context: ./bulletin-board-app
           push: true
-          # On écrit le chemin en minuscules strictes pour éviter le blocage de GitHub
           tags: |
             ghcr.io/mohamedkhemaissia/node-bulletin-board:latest
-            ghcr.io/mohamedkhemaissia/node-bulletin-board:${{ github.sha }}
