@@ -2,17 +2,24 @@ name: DevOps CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main", "dev" ]
+    branches: [ "dev" ]
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  sonarcloud:
-    name: Analyse Qualité Code (SonarCloud)
+  pipeline-global:
+    name: Validation DevSecOps et Build Docker
     runs-on: ubuntu-latest
+    
     steps:
       - name: Récupérer le code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # 1. Analyse de Qualité Code
       - name: Analyse SonarCloud
         uses: SonarSource/sonarcloud-github-action@master
         env:
@@ -25,34 +32,17 @@ jobs:
             -Dsonar.projectName=node-bulletin-board
             -Dsonar.sources=bulletin-board-app
 
-  security-scan:
-    name: Scan Sécurité (Trivy)
-    needs: sonarcloud
-    runs-on: ubuntu-latest
-    steps:
-      - name: Récupérer le code
-        uses: actions/checkout@v4
+      # 2. Scan de Sécurité - Bloquant en cas de faille Critique
       - name: Scanner le code avec Trivy
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: 'bulletin-board-app'
           format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+          exit-code: '1' # <-- TRÈS IMPORTANT : Fait échouer le pipeline si une faille est trouvée
+          severity: 'CRITICAL' # <-- On bloque uniquement sur le niveau le plus dangereux pour l'entreprise
 
-  build-and-push-docker:
-    name: Build & Push Image Docker
-    if: github.ref == 'refs/heads/main'
-    needs: security-scan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write # Crucial pour publier le package
-    steps:
-      - name: Récupérer le code
-        uses: actions/checkout@v4
-
+      # 3. Connexion au Registre GitHub (GHCR)
       - name: Connexion au Registre GitHub (GHCR)
         uses: docker/login-action@v3
         with:
@@ -60,12 +50,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 4. Build et Push de l'image Docker
       - name: Build et Push de l'image Docker
         uses: docker/build-push-action@v5
         with:
           context: ./bulletin-board-app
           push: true
-          # On écrit le chemin en minuscules strictes pour éviter le blocage de GitHub
           tags: |
             ghcr.io/mohamedkhemaissia/node-bulletin-board:latest
-            ghcr.io/mohamedkhemaissia/node-bulletin-board:${{ github.sha }}
