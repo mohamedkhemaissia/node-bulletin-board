@@ -2,7 +2,7 @@ name: DevOps CI/CD Pipeline
 
 on:
   push:
-    branches: [ "master", "main" ] # Déclenche le pipeline à chaque push
+    branches: [ "master", "main" ]
 
 jobs:
   sonarcloud:
@@ -13,15 +13,23 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Analyse SonarCloud
         uses: SonarSource/sonarcloud-github-action@master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # On injecte les paramètres directement ici !
+          args: >
+            -Dsonar.organization=mohamedkhemaissia
+            -Dsonar.projectKey=mohamedkhemaissia_node-bulletin-board
+            -Dsonar.projectName=node-bulletin-board
+            -Dsonar.sources=bulletin-board-app
 
   build-docker:
     name: Build Image Docker
-    needs: sonarcloud # Attend que SonarCloud valide le code
+    needs: sonarcloud
     runs-on: ubuntu-latest
     steps:
       - name: Récupérer le code
